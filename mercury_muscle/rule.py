@@ -129,6 +129,7 @@ class RuleEvaluator:
                     elif p.disease == self.target and i == len(subsets) - 1: 
                         tp += 1
                     elif not p.disease == self.target and not i == len(subsets) - 1:
+                        population_tmp.append(p)
                         continue
                     elif not p.disease == self.target and i == len(subsets) - 1:
                         fp += 1

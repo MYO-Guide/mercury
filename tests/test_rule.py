@@ -127,6 +127,16 @@ def test_totals_equal_cm(example_ruleevaluator_equal):
     assert list(example_ruleevaluator_equal.cm_df['nan']) == [1, 2, 1]
     # fmt: on
 
+def test_totals_subset_cm(example_ruleevaluator_subset):
+    example_ruleevaluator_subset.evaluate_cm(side='R')
+    # fmt: off
+    assert  list(example_ruleevaluator_subset.cm_df['tp']) == [1, 0, 1]
+    assert  list(example_ruleevaluator_subset.cm_df['fp']) == [0, 0, 0]
+    assert  list(example_ruleevaluator_subset.cm_df['tn']) == [0, 0, 0]
+    assert  list(example_ruleevaluator_subset.cm_df['fn']) == [1, 1, 0]
+    assert list(example_ruleevaluator_subset.cm_df['nan']) == [1, 2, 2]
+    # fmt: on
+
 
 # fmt: off
 {
