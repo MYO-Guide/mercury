@@ -30,6 +30,7 @@ class MercuriTable:
         self.allowed_range = allowed_range
 
         if isinstance(df, pd.DataFrame):
+            self._check_invalid_headers()
             self._add_patients_from_df()
 
     def add_patient(self, patient):

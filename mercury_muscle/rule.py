@@ -6,7 +6,7 @@ from tqdm import tqdm
 from copy import deepcopy
 from tabulate import tabulate
 
-from score import MercuriTable
+from mercury_muscle.score import MercuriTable
 
 
 class RuleEvaluator:
@@ -138,11 +138,11 @@ class RuleEvaluator:
                         population_tmp.append(p)
                         continue
                     elif p.disease == self.target and i == len(subsets) - 1: 
-                        tn += 1
+                        fn += 1
                     elif not p.disease == self.target and not i == len(subsets) - 1:
                         continue
                     elif not p.disease == self.target and i == len(subsets) - 1:
-                        fn += 1
+                        tn += 1
 
                 else:
                     raise Exception(
