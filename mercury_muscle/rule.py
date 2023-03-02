@@ -31,8 +31,8 @@ class RuleEvaluator:
         
         res_df = pd.DataFrame(columns=["tp", "fp", "tn", "fn", "nan"])
         for r in self.rules:
-            res = self._evaluate_rule_target(r.query, side)
-            res["Rule"] = r.alias if not r.alias == None else r.query
+            res = self._evaluate(r.query, side, mode="cm")
+            res["rule"] = r.alias if not r.alias == None else r.query
             res_df = pd.concat([res_df, pd.DataFrame(res)], ignore_index=True)
         self.cm_df = res_df.copy()
 
@@ -41,17 +41,16 @@ class RuleEvaluator:
         if not side in ["L", "R"]:
             raise ValueError('side must be "R" or "L"')
 
-        res_df = pd.DataFrame(columns=["Rule", "True", "False", "NA"])
+        res_df = pd.DataFrame(columns=["rule", "true", "false", "nan"])
         for r in self.rules:
-            res = self._evaluate_rule(r.query, side)
-            res["Rule"] = r.alias if not r.alias == None else r.query
+            res = self._evaluate(r.query, side, mode="totals")
+            res["rule"] = r.alias if not r.alias == None else r.query
             res_df = pd.concat([res_df, pd.DataFrame(res)], ignore_index=True)
         self.totals_df = res_df.copy()
 
-    def _evaluate_rule(self, query, side):
+    def _evaluate(self, query, side, mode):
         subsets = query.split('->')
-
-        true, false, nan = 0, 0, 0
+        res = {}
         for i, sub in enumerate(subsets):
             labels = list(filter(None, re.split("[<>=()|&\d]", sub)))
             labels.sort(key=lambda s: len(s), reverse=True)
@@ -68,89 +67,66 @@ class RuleEvaluator:
                 for l in labels:
                     score = getattr(p, f"muscles_{side}")[l].score
                     if np.isnan(score):
-                        nan += 1
+                        if 'nan' in res.keys(): res['nan'] += 1 
+                        else: res['nan'] = 1
                         nan_found = True
                         break
                     query_subs = query_subs.replace(l, str(score))
 
                 if nan_found: continue
-
-                query_subs = query_subs.replace("&", " and ").replace("|", " or ")
-                if eval(query_subs) == True:
-                    if not i == len(subsets) - 1:
-                        population_tmp.append(p)
-                        continue
-                    true += 1
-                elif eval(query_subs) == False:
-                    if not i == len(subsets) - 1:
-                        continue
-                    false += 1
-                else:
-                    raise Exception(
-                        f"The evaluated expression returned a value other than True or False: {query_subs}"
-                    )
-
-        return {"True": [true], "False": [false], "NA": [nan]}
-
-
-    def _evaluate_rule_target(self, query, side):
-        subsets = query.split('->')
-
-        tp, tn, fp, fn, nan = 0, 0, 0, 0, 0
-        for i, sub in enumerate(subsets):
-            labels = list(filter(None, re.split("[<>=()|&\d]", sub)))
-            labels.sort(key=lambda s: len(s), reverse=True)
-
-            if i == 0 : 
-                population = deepcopy(self.mt.patients)
-            else:
-                population = deepcopy(population_tmp)
-
-            population_tmp = []
-            for p in population:
-                nan_found = False
-                query_subs = sub
-                for l in labels:
-                    score = getattr(p, f"muscles_{side}")[l].score
-                    if np.isnan(score):
-                        nan += 1
-                        nan_found = True
-                        break
-                    query_subs = query_subs.replace(l, str(score))
-
-                if nan_found: continue
-
                 query_subs = query_subs.replace("&", " and ").replace("|", " or ")
 
-                if eval(query_subs) == True:
-                    if p.disease == self.target and not i == len(subsets) - 1: 
-                        population_tmp.append(p)
-                        continue
-                    elif p.disease == self.target and i == len(subsets) - 1: 
-                        tp += 1
-                    elif not p.disease == self.target and not i == len(subsets) - 1:
-                        population_tmp.append(p)
-                        continue
-                    elif not p.disease == self.target and i == len(subsets) - 1:
-                        fp += 1
+                last_sub = i == len(subsets) - 1
 
-                elif eval(query_subs) == False:
-                    if p.disease == self.target and not i == len(subsets) - 1: 
-                        population_tmp.append(p)
-                        continue
-                    elif p.disease == self.target and i == len(subsets) - 1: 
-                        fn += 1
-                    elif not p.disease == self.target and not i == len(subsets) - 1:
-                        continue
-                    elif not p.disease == self.target and i == len(subsets) - 1:
-                        tn += 1
+                if mode == 'totals':
+                    res, population_tmp = self._evaluate_rule(query_subs, last_sub, population_tmp, p, res)
 
-                else:
-                    raise Exception(
-                        f"The evaluated expression returned a value other than True or False: {query_subs}"
-                    )
+                if mode == 'cm':
+                    res, population_tmp = self._evaluate_rule_target(query_subs, last_sub, population_tmp, p, res)
 
-        return {"tp": [tp], "fp": [fp], "tn": [tn], "fn": [fn], "nan": [nan]}
+        return {k: [res[k]] for k in res}
+
+    def _evaluate_rule(self, query_subs, last_sub, population_tmp, p, res):
+        if eval(query_subs) == True:
+            if not last_sub:
+                population_tmp.append(p)
+            else: 
+                if 'true' in res.keys(): res['true'] += 1 
+                else: res['true'] = 1
+        elif eval(query_subs) == False:
+            if last_sub:
+                if 'false' in res.keys(): res['false'] += 1 
+                else: res['false'] = 1
+        else:
+            raise Exception(
+                f"The evaluated expression returned a value other than True or False: {query_subs}"
+            )
+        return res, population_tmp
+
+    def _evaluate_rule_target(self, query_subs, last_sub, population_tmp, p, res):
+        if eval(query_subs) == True:
+            if p.disease == self.target and not last_sub: 
+                population_tmp.append(p)
+            elif p.disease == self.target and last_sub: 
+                if 'tp' in res.keys(): res['tp'] += 1 
+                else: res['tp'] = 1
+            elif not p.disease == self.target and not last_sub:
+                population_tmp.append(p)
+            elif not p.disease == self.target and last_sub:
+                if 'fp' in res.keys(): res['fp'] += 1 
+                else: res['fp'] = 1
+        elif eval(query_subs) == False:
+            if p.disease == self.target and last_sub: 
+                if 'fn' in res.keys(): res['fn'] += 1 
+                else: res['fn'] = 1
+            elif not p.disease == self.target and last_sub:
+                if 'tn' in res.keys(): res['tn'] += 1 
+                else: res['tn'] = 1
+        else:
+            raise Exception(
+                f"The evaluated expression returned a value other than True or False: {query_subs}"
+            )
+        return res, population_tmp
     
     def cm_stats(self):
         if not isinstance(self.cm_df, pd.DataFrame):
@@ -192,7 +168,7 @@ class RuleEvaluator:
             pos = (tp + fn) / t
             neg = (tn + fp) / t
 
-            res["Rule"].append(row["Rule"])
+            res["Rule"].append(row["rule"])
             res["Accuracy"].append(accuracy)
             res["Sensitivity"].append(sensitivity)
             res["Specificity"].append(specificity)

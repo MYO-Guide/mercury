@@ -7,3 +7,9 @@
 [![Package Version](https://img.shields.io/pypi/v/mercury-muscle)](https://pypi.org/project/mercury-muscle/)
 
 This library contains a set of utilities for working with Mercuri scores in the context of neuromuscular diseases.
+
+### Install
+
+```
+pip install mercury-muscle
+```
