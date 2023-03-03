@@ -19,51 +19,46 @@ class RuleEvaluator:
         self.mt = mt
         self.target = target
         self.rules = []
-        self.df_cm = pd.DataFrame(columns=[
-            "id",
-            "disease"
-        ])
-        self.df_total = pd.DataFrame(columns=[
-            "id",
-            "disease"
-        ])
+        self.cm_patients = mt.df[["id", "disease"]].copy()
+        self.totals_patients = mt.df[["id", "disease"]].copy()
 
-
-        self.totals_df = None
-        self.cm_df = None
+        self.totals = None
+        self.cm = None
 
     def add_rule(self, query, alias=None):
         self.rules.append(Rule(query, alias))
         col_name = alias if not alias == None else query
-        self.df_cm[col_name] = ""
+        self.cm_patients[col_name] = ""
+        self.totals_patients[col_name] = ""
 
-    def evaluate_cm(self, side="R"):
-        if self.target == None:
-            raise Exception("RuleEvaluator target must be set")
-        
-        res_df = pd.DataFrame(columns=["tp", "fp", "tn", "fn", "nan"])
-        for r in self.rules:
-            res = self._evaluate(r.query, side, mode="cm")
-            res["rule"] = r.alias if not r.alias == None else r.query
-            res_df = pd.concat([res_df, pd.DataFrame(res)], ignore_index=True)
-        self.cm_df = res_df.copy()
+    def evaluate(self, side="R", mode="totals"):
 
+        if mode=="cm":
+            if self.target == None:
+                raise Exception("RuleEvaluator target must be set")
+            res_df = pd.DataFrame(columns=["tp", "fp", "tn", "fn", "nan"])
 
-    def evaluate_totals(self, side="R"):
+        elif mode=="totals":
+            res_df = pd.DataFrame(columns=["rule", "true", "false", "nan"])
+
         if not side in ["L", "R"]:
             raise ValueError('side must be "R" or "L"')
-
-        res_df = pd.DataFrame(columns=["rule", "true", "false", "nan"])
         for r in self.rules:
-            res = self._evaluate(r.query, side, mode="totals")
-            res["rule"] = r.alias if not r.alias == None else r.query
+            rule_name = r.alias if not r.alias == None else r.query
+
+            patient_rule_results = self._evaluate(r.query, side, mode=mode)
+            if mode=="cm": self.cm_patients[rule_name] = patient_rule_results.copy()
+            elif mode=="totals": self.totals_patients[rule_name] = patient_rule_results.copy()
+
+            unique = np.unique(patient_rule_results, return_counts=True)
+            res = {k: [v] for k, v in zip(unique[0], unique[1])}
+            res["rule"] = rule_name
             res_df = pd.concat([res_df, pd.DataFrame(res)], ignore_index=True)
-        self.totals_df = res_df.copy()
+        setattr(self, mode, res_df.copy())
 
     def _evaluate(self, query, side, mode):
         subsets = query.split('->')
-        res = {}
-
+        patient_rule_results = []
         for i, sub in enumerate(subsets):
             labels = list(filter(None, re.split("[<>=()|&\d]", sub)))
             labels.sort(key=lambda s: len(s), reverse=True)
@@ -80,9 +75,8 @@ class RuleEvaluator:
                 for l in labels:
                     score = getattr(p, f"muscles_{side}")[l].score
                     if np.isnan(score):
-                        res = increment(res, 'nan')
+                        patient_rule_results.append('nan')
                         nan_found = True
-                        df_rule.append('nan')
                         break
                     query_subs = query_subs.replace(l, str(score))
 
@@ -91,52 +85,55 @@ class RuleEvaluator:
 
                 last_sub = i == len(subsets) - 1
 
-                if mode == 'totals': ev = self._evaluate_rule
+                if mode == 'totals': ev = self._evaluate_rule_totals
                 elif mode == 'cm': ev = self._evaluate_rule_cm
                 else: raise Exception(f'Unexpected mode: {mode}')
-                res, population_tmp = ev(query_subs, last_sub, population_tmp, p, res)
+                patient_rule_results, population_tmp = ev(query_subs, last_sub, population_tmp, p, patient_rule_results)
+        return patient_rule_results
 
-        return {k: [res[k]] for k in res}
-
-    def _evaluate_rule(self, query_subs, last_sub, population_tmp, p, res):
+    def _evaluate_rule_totals(self, query_subs, last_sub, population_tmp, p, patient_rule_results):
         if eval(query_subs) == True:
             if not last_sub:
                 population_tmp.append(p)
             else: 
-                res = increment(res, 'true')
+                patient_rule_results.append('true')
         elif eval(query_subs) == False:
             if last_sub:
-                res = increment(res, 'false')
+                patient_rule_results.append('false')
+            else:
+                patient_rule_results.append('ignore')
         else:
             raise Exception(
                 f"The evaluated expression returned a value other than True or False: {query_subs}"
             )
-        return res, population_tmp
+        return patient_rule_results, population_tmp
 
-    def _evaluate_rule_cm(self, query_subs, last_sub, population_tmp, p, res):
+    def _evaluate_rule_cm(self, query_subs, last_sub, population_tmp, p, patient_rule_results):
         positive = p.disease == self.target
         if eval(query_subs) == True:
             if positive and not last_sub: 
                 population_tmp.append(p)
             elif positive and last_sub: 
-                res = increment(res, 'tp')
+                patient_rule_results.append('tp')
             elif not positive and not last_sub:
                 population_tmp.append(p)
             elif not positive and last_sub:
-                res = increment(res, 'fp')
+                patient_rule_results.append('fp')
         elif eval(query_subs) == False:
             if positive and last_sub: 
-                res = increment(res, 'fn')
+                patient_rule_results.append('fn')
             elif not positive and last_sub:
-                res = increment(res, 'tn')
+                patient_rule_results.append('tn')
+            else:
+                patient_rule_results.append('ignore')
         else:
             raise Exception(
                 f"The evaluated expression returned a value other than True or False: {query_subs}"
             )
-        return res, population_tmp
+        return patient_rule_results, population_tmp
     
     def cm_stats(self):
-        if not isinstance(self.cm_df, pd.DataFrame):
+        if not isinstance(self.cm, pd.DataFrame):
             print('The confussion matrix dataframe does not exist. Run evaluate_cm()')
             return
 
@@ -155,7 +152,7 @@ class RuleEvaluator:
             "Positives": [],
             "Negatives": [],
         }
-        for idx, row in self.cm_df.iterrows():
+        for idx, row in self.cm.iterrows():
             tp = row["tp"]
             fp = row["fp"]
             tn = row["tn"]
@@ -198,14 +195,14 @@ class RuleEvaluator:
         return pd.DataFrame(res)
     
     def show_totals(self):
-        if isinstance(self.totals_df, pd.DataFrame):
-            print(tabulate(self.totals_df, headers="keys", tablefmt="github"))
+        if isinstance(self.totals, pd.DataFrame):
+            print(tabulate(self.totals, headers="keys", tablefmt="github"))
         else:
             print("Totals not evaluated, run evaluate_totals()")
 
     def show_cm(self):
-        if isinstance(self.cm_df, pd.DataFrame):
-            print(tabulate(self.cm_df, headers="keys", tablefmt="github"))
+        if isinstance(self.cm, pd.DataFrame):
+            print(tabulate(self.cm, headers="keys", tablefmt="github"))
         else:
             print("Confussion Matrixes not evaluated, run evaluate_cm()")
     
@@ -217,7 +214,8 @@ class RuleEvaluator:
 
         r = self.rules[idx]
         new_col_name = r.alias if not r.alias == None else r.query
-        self.df_cm.rename({old_col_name: new_col_name})
+        self.cm_patients.rename({old_col_name: new_col_name})
+        self.totals_patients.rename({old_col_name: new_col_name})
 
 class Rule:
     def __init__(self, query: str, alias: str = None) -> None:
