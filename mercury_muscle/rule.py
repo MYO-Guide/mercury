@@ -19,12 +19,23 @@ class RuleEvaluator:
         self.mt = mt
         self.target = target
         self.rules = []
+        self.df_cm = pd.DataFrame(columns=[
+            "id",
+            "disease"
+        ])
+        self.df_total = pd.DataFrame(columns=[
+            "id",
+            "disease"
+        ])
+
 
         self.totals_df = None
         self.cm_df = None
 
     def add_rule(self, query, alias=None):
         self.rules.append(Rule(query, alias))
+        col_name = alias if not alias == None else query
+        self.df_cm[col_name] = ""
 
     def evaluate_cm(self, side="R"):
         if self.target == None:
@@ -52,6 +63,7 @@ class RuleEvaluator:
     def _evaluate(self, query, side, mode):
         subsets = query.split('->')
         res = {}
+
         for i, sub in enumerate(subsets):
             labels = list(filter(None, re.split("[<>=()|&\d]", sub)))
             labels.sort(key=lambda s: len(s), reverse=True)
@@ -70,6 +82,7 @@ class RuleEvaluator:
                     if np.isnan(score):
                         res = increment(res, 'nan')
                         nan_found = True
+                        df_rule.append('nan')
                         break
                     query_subs = query_subs.replace(l, str(score))
 
@@ -197,8 +210,14 @@ class RuleEvaluator:
             print("Confussion Matrixes not evaluated, run evaluate_cm()")
     
     def update_rule(self, idx, alias=None, query=None):
+        old_col_name = r.alias if not r.alias == None else r.query
+
         if not alias == None: self.rules[idx].alias = alias
         if not query == None: self.rules[idx].query = query
+
+        r = self.rules[idx]
+        new_col_name = r.alias if not r.alias == None else r.query
+        self.df_cm.rename({old_col_name: new_col_name})
 
 class Rule:
     def __init__(self, query: str, alias: str = None) -> None:
