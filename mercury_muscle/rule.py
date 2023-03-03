@@ -19,8 +19,11 @@ class RuleEvaluator:
         self.mt = mt
         self.target = target
         self.rules = []
+
         self.cm_patients = mt.df[["id", "disease"]].copy()
         self.totals_patients = mt.df[["id", "disease"]].copy()
+        self.cm_patients.set_index("id", inplace=True)
+        self.totals_patients.set_index("id", inplace=True)
 
         self.totals = None
         self.cm = None
@@ -46,19 +49,20 @@ class RuleEvaluator:
         for r in self.rules:
             rule_name = r.alias if not r.alias == None else r.query
 
-            patient_rule_results = self._evaluate(r.query, side, mode=mode)
-            if mode=="cm": self.cm_patients[rule_name] = patient_rule_results.copy()
-            elif mode=="totals": self.totals_patients[rule_name] = patient_rule_results.copy()
+            self._evaluate(r.query, side, mode, rule_name)
 
-            unique = np.unique(patient_rule_results, return_counts=True)
+            if mode == "cm":
+                unique = np.unique(list(self.cm_patients[rule_name]), return_counts=True)
+            elif mode == "totals":
+                unique = np.unique(list(self.totals_patients[rule_name]), return_counts=True)
+
             res = {k: [v] for k, v in zip(unique[0], unique[1])}
             res["rule"] = rule_name
             res_df = pd.concat([res_df, pd.DataFrame(res)], ignore_index=True)
         setattr(self, mode, res_df.copy())
 
-    def _evaluate(self, query, side, mode):
+    def _evaluate(self, query, side, mode, rule_name):
         subsets = query.split('->')
-        patient_rule_results = []
         for i, sub in enumerate(subsets):
             labels = list(filter(None, re.split("[<>=()|&\d]", sub)))
             labels.sort(key=lambda s: len(s), reverse=True)
@@ -75,7 +79,7 @@ class RuleEvaluator:
                 for l in labels:
                     score = getattr(p, f"muscles_{side}")[l].score
                     if np.isnan(score):
-                        patient_rule_results.append('nan')
+                        self.totals_patients.at[p.id, rule_name] = 'nan'
                         nan_found = True
                         break
                     query_subs = query_subs.replace(l, str(score))
@@ -88,49 +92,49 @@ class RuleEvaluator:
                 if mode == 'totals': ev = self._evaluate_rule_totals
                 elif mode == 'cm': ev = self._evaluate_rule_cm
                 else: raise Exception(f'Unexpected mode: {mode}')
-                patient_rule_results, population_tmp = ev(query_subs, last_sub, population_tmp, p, patient_rule_results)
-        return patient_rule_results
+                population_tmp = ev(query_subs, last_sub, population_tmp, p, rule_name)
 
-    def _evaluate_rule_totals(self, query_subs, last_sub, population_tmp, p, patient_rule_results):
+    def _evaluate_rule_totals(self, query_subs, last_sub, population_tmp, p, rule_name):
+        
         if eval(query_subs) == True:
             if not last_sub:
                 population_tmp.append(p)
             else: 
-                patient_rule_results.append('true')
+                self.totals_patients.at[p.id, rule_name] = 'true'
         elif eval(query_subs) == False:
             if last_sub:
-                patient_rule_results.append('false')
+                self.totals_patients.at[p.id, rule_name] = 'false'
             else:
-                patient_rule_results.append('ignore')
+                self.totals_patients.at[p.id, rule_name] = 'ignore'
         else:
             raise Exception(
                 f"The evaluated expression returned a value other than True or False: {query_subs}"
             )
-        return patient_rule_results, population_tmp
+        return population_tmp
 
-    def _evaluate_rule_cm(self, query_subs, last_sub, population_tmp, p, patient_rule_results):
+    def _evaluate_rule_cm(self, query_subs, last_sub, population_tmp, p, rule_name):
         positive = p.disease == self.target
         if eval(query_subs) == True:
             if positive and not last_sub: 
                 population_tmp.append(p)
             elif positive and last_sub: 
-                patient_rule_results.append('tp')
+                self.cm_patients.at[p.id, rule_name] = 'tp'
             elif not positive and not last_sub:
                 population_tmp.append(p)
             elif not positive and last_sub:
-                patient_rule_results.append('fp')
+                self.cm_patients.at[p.id, rule_name] = 'fp'
         elif eval(query_subs) == False:
             if positive and last_sub: 
-                patient_rule_results.append('fn')
+                self.cm_patients.at[p.id, rule_name] = 'fn'
             elif not positive and last_sub:
-                patient_rule_results.append('tn')
+                self.cm_patients.at[p.id, rule_name] = 'tn'
             else:
-                patient_rule_results.append('ignore')
+                self.cm_patients.at[p.id, rule_name] = 'ignore'
         else:
             raise Exception(
                 f"The evaluated expression returned a value other than True or False: {query_subs}"
             )
-        return patient_rule_results, population_tmp
+        return population_tmp
     
     def cm_stats(self):
         if not isinstance(self.cm, pd.DataFrame):
@@ -185,6 +189,7 @@ class RuleEvaluator:
             res["Population"].append(t)
             res["Positives"].append(pos)
             res["Negatives"].append(neg)
+
         return pd.DataFrame(res)
 
     def show_rules(self) -> pd.DataFrame:
