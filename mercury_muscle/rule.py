@@ -6,6 +6,7 @@ from tqdm import tqdm
 from copy import deepcopy
 from tabulate import tabulate
 
+from mercury_muscle.utils import increment
 from mercury_muscle.score import MercuriTable
 
 
@@ -67,8 +68,7 @@ class RuleEvaluator:
                 for l in labels:
                     score = getattr(p, f"muscles_{side}")[l].score
                     if np.isnan(score):
-                        if 'nan' in res.keys(): res['nan'] += 1 
-                        else: res['nan'] = 1
+                        res = increment(res, 'nan')
                         nan_found = True
                         break
                     query_subs = query_subs.replace(l, str(score))
@@ -78,11 +78,10 @@ class RuleEvaluator:
 
                 last_sub = i == len(subsets) - 1
 
-                if mode == 'totals':
-                    res, population_tmp = self._evaluate_rule(query_subs, last_sub, population_tmp, p, res)
-
-                if mode == 'cm':
-                    res, population_tmp = self._evaluate_rule_target(query_subs, last_sub, population_tmp, p, res)
+                if mode == 'totals': ev = self._evaluate_rule
+                elif mode == 'cm': ev = self._evaluate_rule_cm
+                else: raise Exception(f'Unexpected mode: {mode}')
+                res, population_tmp = ev(query_subs, last_sub, population_tmp, p, res)
 
         return {k: [res[k]] for k in res}
 
@@ -91,37 +90,32 @@ class RuleEvaluator:
             if not last_sub:
                 population_tmp.append(p)
             else: 
-                if 'true' in res.keys(): res['true'] += 1 
-                else: res['true'] = 1
+                res = increment(res, 'true')
         elif eval(query_subs) == False:
             if last_sub:
-                if 'false' in res.keys(): res['false'] += 1 
-                else: res['false'] = 1
+                res = increment(res, 'false')
         else:
             raise Exception(
                 f"The evaluated expression returned a value other than True or False: {query_subs}"
             )
         return res, population_tmp
 
-    def _evaluate_rule_target(self, query_subs, last_sub, population_tmp, p, res):
+    def _evaluate_rule_cm(self, query_subs, last_sub, population_tmp, p, res):
+        positive = p.disease == self.target
         if eval(query_subs) == True:
-            if p.disease == self.target and not last_sub: 
+            if positive and not last_sub: 
                 population_tmp.append(p)
-            elif p.disease == self.target and last_sub: 
-                if 'tp' in res.keys(): res['tp'] += 1 
-                else: res['tp'] = 1
-            elif not p.disease == self.target and not last_sub:
+            elif positive and last_sub: 
+                res = increment(res, 'tp')
+            elif not positive and not last_sub:
                 population_tmp.append(p)
-            elif not p.disease == self.target and last_sub:
-                if 'fp' in res.keys(): res['fp'] += 1 
-                else: res['fp'] = 1
+            elif not positive and last_sub:
+                res = increment(res, 'fp')
         elif eval(query_subs) == False:
-            if p.disease == self.target and last_sub: 
-                if 'fn' in res.keys(): res['fn'] += 1 
-                else: res['fn'] = 1
-            elif not p.disease == self.target and last_sub:
-                if 'tn' in res.keys(): res['tn'] += 1 
-                else: res['tn'] = 1
+            if positive and last_sub: 
+                res = increment(res, 'fn')
+            elif not positive and last_sub:
+                res = increment(res, 'tn')
         else:
             raise Exception(
                 f"The evaluated expression returned a value other than True or False: {query_subs}"
