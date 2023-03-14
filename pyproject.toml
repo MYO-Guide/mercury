@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mercury_muscle"
-version = "0.1.1"
+version = "0.1.2"
 description = "Utilities for working with Mercuri scores in the context of neuromuscular diseases."
 license = "MIT"
 authors = ["Jose-Verdu-Diaz <jose.verdu-diaz2@newcastle.ac.uk>"]
