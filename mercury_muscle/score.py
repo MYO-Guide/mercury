@@ -63,6 +63,16 @@ class MercuriTable:
             if len(re.findall("[<>=\-()|&\d]", col)) > 0:
                 raise Exception('Ilegal character found in column headers. Numbers are not allowed. The following characters are also not allowed: <>=-()|&')
 
+    def disease_count(self):
+        res = {}
+        for p in self.patients:
+            if not p.disease in res.keys():
+                res[p.disease] = 0
+            res[p.disease] += 1
+        
+        return pd.Series(res)
+            
+
 class Patient:
     def __init__(self, id=None, disease=None) -> None:
         self.id: str = id

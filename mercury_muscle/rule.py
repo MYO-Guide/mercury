@@ -34,7 +34,7 @@ class RuleEvaluator:
         self.cm_patients[col_name] = ""
         self.totals_patients[col_name] = ""
 
-    def evaluate(self, side="R", mode="totals"):
+    def evaluate(self, side="R", mode="totals", sequential:bool = False):
 
         if mode=="cm":
             if self.target == None:
@@ -46,10 +46,12 @@ class RuleEvaluator:
 
         if not side in ["L", "R"]:
             raise ValueError('side must be "R" or "L"')
+        
+        last_rule = None
         for r in self.rules:
             rule_name = r.alias if not r.alias == None else r.query
 
-            self._evaluate(r.query, side, mode, rule_name)
+            self._evaluate(r.query, side, mode, rule_name, sequential, last_rule)
 
             if mode == "cm":
                 unique = np.unique(list(self.cm_patients[rule_name]), return_counts=True)
@@ -59,14 +61,16 @@ class RuleEvaluator:
             res = {k: [v] for k, v in zip(unique[0], unique[1])}
             res["rule"] = rule_name
             res_df = pd.concat([res_df, pd.DataFrame(res)], ignore_index=True)
+
+            last_rule = rule_name
+
         setattr(self, mode, res_df.copy())
 
-    def _evaluate(self, query, side, mode, rule_name):
+    def _evaluate(self, query, side, mode, rule_name, sequential,  last_rule):
         subsets = query.split('->')
         for i, sub in enumerate(subsets):
             labels = list(filter(None, re.split("[<>=()|&\d]", sub)))
             labels.sort(key=lambda s: len(s), reverse=True)
-
             if i == 0 : 
                 population = deepcopy(self.mt.patients)
             else:
@@ -79,24 +83,29 @@ class RuleEvaluator:
                 for l in labels:
                     score = getattr(p, f"muscles_{side}")[l].score
                     if np.isnan(score):
-                        self.totals_patients.at[p.id, rule_name] = 'nan'
+                        if mode=="cm": self.cm_patients.at[p.id, rule_name] = 'nan'
+                        elif mode=="totals": self.totals_patients.at[p.id, rule_name] = 'nan'
                         nan_found = True
                         break
                     query_subs = query_subs.replace(l, str(score))
 
-                if nan_found: continue
                 query_subs = query_subs.replace("&", " and ").replace("|", " or ")
-
                 last_sub = i == len(subsets) - 1
-
                 if mode == 'totals': ev = self._evaluate_rule_totals
                 elif mode == 'cm': ev = self._evaluate_rule_cm
                 else: raise Exception(f'Unexpected mode: {mode}')
-                population_tmp = ev(query_subs, last_sub, population_tmp, p, rule_name)
+                population_tmp = ev(query_subs, last_sub, population_tmp, p, rule_name, nan_found, sequential, last_rule)
 
-    def _evaluate_rule_totals(self, query_subs, last_sub, population_tmp, p, rule_name):
-        
-        if eval(query_subs) == True:
+    def _evaluate_rule_totals(self, query_subs, last_sub, population_tmp, p, rule_name, nan_found, sequential, last_rule):
+        if(
+            sequential and 
+            not last_rule == None and
+            not self.totals_patients.at[p.id, last_rule] == 'true'
+        ):
+            self.totals_patients.at[p.id, rule_name] = 'ignore'
+        elif nan_found:
+            self.totals_patients.at[p.id, rule_name] = 'nan'
+        elif eval(query_subs) == True:
             if not last_sub:
                 population_tmp.append(p)
             else: 
@@ -112,9 +121,19 @@ class RuleEvaluator:
             )
         return population_tmp
 
-    def _evaluate_rule_cm(self, query_subs, last_sub, population_tmp, p, rule_name):
+    def _evaluate_rule_cm(self, query_subs, last_sub, population_tmp, p, rule_name, nan_found, sequential,  last_rule):
         positive = p.disease == self.target
-        if eval(query_subs) == True:
+
+        if(
+            sequential and 
+            not last_rule == None and
+            not self.cm_patients.at[p.id, last_rule] == 'tp' and
+            not self.cm_patients.at[p.id, last_rule] == 'fp'
+        ):
+            self.cm_patients.at[p.id, rule_name] = 'ignore'
+        elif nan_found:
+            self.cm_patients.at[p.id, rule_name] = 'nan'
+        elif eval(query_subs) == True:
             if positive and not last_sub: 
                 population_tmp.append(p)
             elif positive and last_sub: 

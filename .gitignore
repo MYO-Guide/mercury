@@ -129,8 +129,8 @@ dmypy.json
 .pyre/
 
 ########################
-results/
+output/
 data/
 .vscode/
-test_notebook.ipynb
+test_notebook*.ipynb
 *.$*
